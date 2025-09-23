@@ -1,0 +1,260 @@
+use std::borrow::Cow;
+
+/// Lightweight HTML tag escaping without regex dependency
+/// 
+/// This replaces the complex regex-based approach with simple pattern matching
+/// that identifies and escapes HTML-like patterns that would be interpreted
+/// by CommonMark as valid HTML.
+pub(crate) fn escape_html_simple(text: Cow<'_, str>) -> Cow<'_, str> {
+    let mut result = String::new();
+    let mut chars = text.char_indices();
+    let mut modified = false;
+
+    while let Some((i, ch)) = chars.next() {
+        if ch == '<' {
+            if let Some(pattern_len) = find_html_pattern(&text[i..]) {
+                let pattern = &text[i..i + pattern_len];
+                
+                // For all patterns, add backslash and then the pattern
+                result.push('\\');
+                result.push_str(pattern);
+                
+                modified = true;
+                
+                // Skip the rest of the pattern
+                for _ in 1..pattern_len {
+                    chars.next();
+                }
+            } else {
+                result.push(ch);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+
+    if modified {
+        Cow::Owned(result)
+    } else {
+        text
+    }
+}
+
+/// Check if there's an HTML pattern starting at the given position
+/// Returns the length of the pattern if found
+fn find_html_pattern(text: &str) -> Option<usize> {
+    if !text.starts_with('<') {
+        return None;
+    }
+
+    // HTML comments: <!-- ... -->
+    if text.starts_with("<!--") {
+        if let Some(pos) = text.find("-->") {
+            return Some(pos + 3);
+        }
+        return None;
+    }
+
+    // Processing instructions: <?...?>
+    if text.starts_with("<?") {
+        if let Some(pos) = text.find("?>") {
+            return Some(pos + 2);
+        }
+        return None;
+    }
+
+    // CDATA: <![CDATA[...]]>
+    if text.starts_with("<![CDATA[") {
+        if let Some(pos) = text.find("]]>") {
+            return Some(pos + 3);
+        }
+        return None;
+    }
+
+    // Declarations: <!...> (but not comments or CDATA)
+    if text.starts_with("<!") && !text.starts_with("<!--") && !text.starts_with("<![CDATA[") {
+        if let Some(pos) = text.find('>') {
+            return Some(pos + 1);
+        }
+        return None;
+    }
+
+    // Check for HTML block patterns (case insensitive, beginning of line)
+    if is_html_block_pattern(text) {
+        return find_end_of_incomplete_tag(text);
+    }
+
+    // Regular HTML tags: <tag...> or </tag>
+    parse_html_tag(text)
+}
+
+/// Check if this looks like an HTML block pattern that should be escaped
+fn is_html_block_pattern(text: &str) -> bool {
+    // Convert to lowercase for case-insensitive matching
+    let lower = text.to_lowercase();
+    
+    // HTML block type 1: script, pre, textarea, style
+    if lower.starts_with("<script") || lower.starts_with("<pre") || 
+       lower.starts_with("<textarea") || lower.starts_with("<style") {
+        return true;
+    }
+    
+    // HTML block type 6: common block elements
+    let block_elements = [
+        "address", "article", "aside", "base", "basefont", "blockquote", "body",
+        "caption", "center", "col", "colgroup", "dd", "details", "dialog", "dir",
+        "div", "dl", "dt", "fieldset", "figcaption", "figure", "footer", "form",
+        "frame", "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header",
+        "hr", "html", "iframe", "legend", "li", "link", "main", "menu", "menuitem",
+        "nav", "noframes", "ol", "optgroup", "option", "p", "param", "section",
+        "source", "summary", "table", "tbody", "td", "tfoot", "th", "thead",
+        "title", "tr", "track", "ul"
+    ];
+    
+    for element in &block_elements {
+        if lower.starts_with(&format!("<{}", element)) || lower.starts_with(&format!("</{}", element)) {
+            return true;
+        }
+    }
+    
+    false
+}
+
+/// Find the end of an incomplete tag (for block patterns)
+fn find_end_of_incomplete_tag(text: &str) -> Option<usize> {
+    // For incomplete tags, we want to escape just the opening part
+    // Look for space, > or end of string
+    for (i, ch) in text.char_indices().skip(1) {
+        if ch.is_ascii_whitespace() || ch == '>' {
+            return Some(i);
+        }
+    }
+    // If no space or >, escape the whole thing
+    Some(text.len())
+}
+
+/// Parse an HTML tag and return its length if valid
+fn parse_html_tag(text: &str) -> Option<usize> {
+    let mut chars = text.chars();
+    let mut pos = 0;
+
+    // Must start with '<'
+    if chars.next() != Some('<') {
+        return None;
+    }
+    pos += 1;
+
+    // Optional '/' for closing tags
+    if chars.clone().next() == Some('/') {
+        chars.next();
+        pos += 1;
+    }
+
+    // Tag name must start with a letter
+    let first_char = chars.next()?;
+    if !first_char.is_ascii_alphabetic() {
+        return None;
+    }
+    pos += 1;
+
+    // Continue with tag name (letters, digits, hyphens)
+    while let Some(ch) = chars.clone().next() {
+        if ch.is_ascii_alphanumeric() || ch == '-' {
+            chars.next();
+            pos += 1;
+        } else {
+            break;
+        }
+    }
+
+    // Skip to end of tag, handling quoted strings
+    let mut in_quotes = false;
+    let mut quote_char = '\0';
+
+    while let Some(ch) = chars.next() {
+        pos += 1;
+        
+        if !in_quotes {
+            match ch {
+                '"' | '\'' => {
+                    in_quotes = true;
+                    quote_char = ch;
+                }
+                '>' => return Some(pos),
+                _ => {}
+            }
+        } else if ch == quote_char {
+            in_quotes = false;
+        }
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_tags() {
+        assert_eq!(escape_html_simple("hello".into()), "hello");
+        assert_eq!(escape_html_simple("<p>".into()), "\\<p>");
+        assert_eq!(escape_html_simple("</p>".into()), "\\</p>");
+        assert_eq!(escape_html_simple("<div>content</div>".into()), "\\<div>content\\</div>");
+    }
+
+    #[test]
+    fn test_comments() {
+        assert_eq!(escape_html_simple("<!-- comment -->".into()), "\\<!-- comment -->");
+        assert_eq!(escape_html_simple("<!---->".into()), "\\<!---->");
+        assert_eq!(escape_html_simple("<!--->".into()), "\\<!--->");
+    }
+
+    #[test] 
+    fn test_processing_instructions() {
+        assert_eq!(escape_html_simple("<?xml version=\"1.0\"?>".into()), "\\<?xml version=\"1.0\"?>");
+        assert_eq!(escape_html_simple("<?processing instructions?>".into()), "\\<?processing instructions?>");
+    }
+
+    #[test]
+    fn test_declarations() {
+        assert_eq!(escape_html_simple("<!DOCTYPE html>".into()), "\\<!DOCTYPE html>");
+        assert_eq!(escape_html_simple("<!A declaration>".into()), "\\<!A declaration>");
+    }
+
+    #[test]
+    fn test_cdata() {
+        assert_eq!(escape_html_simple("<![CDATA[character data]]>".into()), "\\<![CDATA[character data]]>");
+    }
+
+    #[test]
+    fn test_tags_with_attributes() {
+        assert_eq!(escape_html_simple("<a href=\"test\">".into()), "\\<a href=\"test\">");
+        assert_eq!(escape_html_simple("<img src='image.jpg' alt=\"test\"/>".into()), "\\<img src='image.jpg' alt=\"test\"/>");
+    }
+
+    #[test]
+    fn test_non_html() {
+        assert_eq!(escape_html_simple("< not html".into()), "< not html");
+        assert_eq!(escape_html_simple("<123>".into()), "<123>");
+        assert_eq!(escape_html_simple("< >".into()), "< >");
+    }
+
+    #[test]
+    fn test_actual_cases() {
+        // From the real test cases
+        let input = "Test <code>tags</code>, <!-- comments -->, <?processing instructions?>, <!A declaration>, and <![CDATA[character data]]>.";
+        let expected = r"Test \<code>tags\</code>, \<!-- comments -->, \<?processing instructions?>, \<!A declaration>, and \<![CDATA[character data]]>.";
+        assert_eq!(escape_html_simple(input.into()), expected);
+    }
+
+    #[test]
+    fn test_incomplete_block_tags() {
+        // Test incomplete HTML block tags
+        assert_eq!(escape_html_simple("<pre".into()), "\\<pre");
+        assert_eq!(escape_html_simple("<script".into()), "\\<script");
+        assert_eq!(escape_html_simple("<style".into()), "\\<style");
+        assert_eq!(escape_html_simple("<address".into()), "\\<address");
+        assert_eq!(escape_html_simple("<ul".into()), "\\<ul");
+    }
+}
