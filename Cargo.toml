@@ -21,7 +21,6 @@ scraper = "0.23.1"
 criterion = { version = "0.7", features = ["html_reports"] }
 pretty_assertions = "1.4.1"
 indoc = "2.0.6"
-regex = "1.11.1"
 
 [[bench]]
 name = "convert_bench"

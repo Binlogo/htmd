@@ -290,7 +290,6 @@ dependencies = [
  "indoc",
  "markup5ever_rcdom",
  "pretty_assertions",
- "regex",
  "scraper",
 ]
 

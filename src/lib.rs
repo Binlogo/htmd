@@ -5,9 +5,6 @@ pub(crate) mod node_util;
 pub mod options;
 pub(crate) mod text_util;
 
-#[cfg(test)]
-mod debug_regex;
-
 use std::rc::Rc;
 
 use dom_walker::walk_node;
