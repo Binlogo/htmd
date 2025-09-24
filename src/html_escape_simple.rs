@@ -7,7 +7,7 @@ use std::borrow::Cow;
 /// by CommonMark as valid HTML.
 pub(crate) fn escape_html_simple(text: Cow<'_, str>) -> Cow<'_, str> {
     let mut result = String::new();
-    let mut chars = text.char_indices();
+    let mut chars = text.char_indices().peekable();
     let mut modified = false;
 
     while let Some((i, ch)) = chars.next() {
@@ -21,8 +21,13 @@ pub(crate) fn escape_html_simple(text: Cow<'_, str>) -> Cow<'_, str> {
                 
                 modified = true;
                 
-                // Skip the rest of the pattern
-                for _ in 1..pattern_len {
+                // Skip the rest of the pattern by advancing the iterator
+                // We need to skip all characters that are within the pattern
+                let pattern_end_byte = i + pattern_len;
+                while let Some(&(next_i, _)) = chars.peek() {
+                    if next_i >= pattern_end_byte {
+                        break;
+                    }
                     chars.next();
                 }
             } else {
@@ -117,48 +122,46 @@ fn is_html_block_pattern(text: &str) -> bool {
     false
 }
 
-/// Find the end of an incomplete tag (for block patterns)
+/// Find the end of an incomplete tag (for block patterns) - returns byte position
 fn find_end_of_incomplete_tag(text: &str) -> Option<usize> {
     // For incomplete tags, we want to escape just the opening part
     // Look for space, > or end of string
-    for (i, ch) in text.char_indices().skip(1) {
+    for (byte_pos, ch) in text.char_indices().skip(1) {
         if ch.is_ascii_whitespace() || ch == '>' {
-            return Some(i);
+            return Some(byte_pos);
         }
     }
     // If no space or >, escape the whole thing
     Some(text.len())
 }
 
-/// Parse an HTML tag and return its length if valid
+/// Parse an HTML tag and return its byte length if valid
 fn parse_html_tag(text: &str) -> Option<usize> {
-    let mut chars = text.chars();
-    let mut pos = 0;
-
+    let mut char_indices = text.char_indices();
+    
     // Must start with '<'
-    if chars.next() != Some('<') {
+    let (_, ch) = char_indices.next()?;
+    if ch != '<' {
         return None;
     }
-    pos += 1;
 
     // Optional '/' for closing tags
-    if chars.clone().next() == Some('/') {
-        chars.next();
-        pos += 1;
+    if let Some((_, ch)) = char_indices.clone().next() {
+        if ch == '/' {
+            char_indices.next();
+        }
     }
 
     // Tag name must start with a letter
-    let first_char = chars.next()?;
+    let (_, first_char) = char_indices.next()?;
     if !first_char.is_ascii_alphabetic() {
         return None;
     }
-    pos += 1;
 
     // Continue with tag name (letters, digits, hyphens)
-    while let Some(ch) = chars.clone().next() {
+    while let Some((_, ch)) = char_indices.clone().next() {
         if ch.is_ascii_alphanumeric() || ch == '-' {
-            chars.next();
-            pos += 1;
+            char_indices.next();
         } else {
             break;
         }
@@ -168,16 +171,14 @@ fn parse_html_tag(text: &str) -> Option<usize> {
     let mut in_quotes = false;
     let mut quote_char = '\0';
 
-    while let Some(ch) = chars.next() {
-        pos += 1;
-        
+    while let Some((byte_pos, ch)) = char_indices.next() {
         if !in_quotes {
             match ch {
                 '"' | '\'' => {
                     in_quotes = true;
                     quote_char = ch;
                 }
-                '>' => return Some(pos),
+                '>' => return Some(byte_pos + ch.len_utf8()),
                 _ => {}
             }
         } else if ch == quote_char {
@@ -255,5 +256,14 @@ mod tests {
         assert_eq!(escape_html_simple("<style".into()), "\\<style");
         assert_eq!(escape_html_simple("<address".into()), "\\<address");
         assert_eq!(escape_html_simple("<ul".into()), "\\<ul");
+    }
+
+    #[test]
+    fn test_unicode_and_emoji() {
+        // Test cases that would panic due to character/byte index confusion
+        assert_eq!(escape_html_simple("<p😀>".into()), "\\<p😀>");
+        assert_eq!(escape_html_simple("<div>😀</div>".into()), "\\<div>😀\\</div>");
+        assert_eq!(escape_html_simple("<p class='😀'>".into()), "\\<p class='😀'>");
+        assert_eq!(escape_html_simple("<script😀>".into()), "\\<script😀>");
     }
 }
