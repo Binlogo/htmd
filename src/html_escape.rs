@@ -64,16 +64,14 @@ fn find_html_pattern(text: &str) -> Option<usize> {
         return None;
     }
 
-    // CDATA: <![CDATA[...]]>
-    if text.starts_with("<![CDATA[") {
-        if let Some(pos) = text.find("]]>") {
-            return Some(pos + 3);
-        }
+    // CDATA: <![CDATA[...]]> - Let markdown escaper handle the brackets
+    // Also handle CDATA that has already been markdown-escaped: <!\[CDATA\[...\]\]>
+    if text.starts_with("<![CDATA[") || text.starts_with("<!\\[CDATA\\[") {
         return None;
     }
 
     // Declarations: <!...> (but not comments or CDATA)
-    if text.starts_with("<!") && !text.starts_with("<!--") && !text.starts_with("<![CDATA[") {
+    if text.starts_with("<!") && !text.starts_with("<!--") && !text.starts_with("<![CDATA[") && !text.starts_with("<!\\[CDATA\\[") {
         if let Some(pos) = text.find('>') {
             return Some(pos + 1);
         }
@@ -221,7 +219,8 @@ mod tests {
 
     #[test]
     fn test_cdata() {
-        assert_eq!(escape_html("<![CDATA[character data]]>".into()), "\\<![CDATA[character data]]>");
+        // CDATA is not escaped by HTML escaping, only by markdown escaping later
+        assert_eq!(escape_html("<![CDATA[character data]]>".into()), "<![CDATA[character data]]>");
     }
 
     #[test]
@@ -242,7 +241,7 @@ mod tests {
         // From the real test cases
         let input = "Test <code>tags</code>, <!-- comments -->, <?processing instructions?>, <!A declaration>, and <![CDATA[character data]]>.";
         // Updated expected result to match current implementation
-        let expected = r"Test \<code>tags\</code>, \<!-- comments -->, \<?processing instructions?>, \<!A declaration>, and \<![CDATA[character data]]>.";
+        let expected = r"Test \<code>tags\</code>, \<!-- comments -->, \<?processing instructions?>, \<!A declaration>, and <![CDATA[character data]]>.";
         assert_eq!(escape_html(input.into()), expected);
     }
 

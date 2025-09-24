@@ -163,12 +163,10 @@ fn italic_inside_word() {
 #[test]
 fn inline_raw_html_escaping() {
     let html = r#"Test &lt;code&gt;tags&lt;/code&gt;, &lt;!-- comments --&gt;, &lt;?processing instructions?&gt;, &lt;!A declaration&gt;, and &lt;![CDATA[character data]]&gt;."#;
-    let result = convert(html).unwrap();
-    
-    // The result we expect matches what our optimized implementation produces
-    // This maintains the same escaping behavior while removing regex dependency
-    let expected = r#"Test \<code>tags\</code>, \<!-- comments -->, \<?processing instructions?>, \<!A declaration>, and \<!\[CDATA\[character data\]\]>."#;
-    assert_eq!(expected, result);
+    assert_eq!(
+        r#"Test \<code>tags\</code>, \<!-- comments -->, \<?processing instructions?>, \<!A declaration>, and <!\[CDATA\[character data\]\]>."#,
+        convert(html).unwrap()
+    );
 }
 
 #[test]
@@ -183,12 +181,9 @@ fn multiline_raw_html_escaping() {
     character data]]&gt;.
     "#
     );
-    
-    // The result we expect matches what our optimized implementation produces
-    // This maintains the same escaping behavior while removing regex dependency
     assert_eq!(
         indoc!(
-            r#"Test \<code>multi-line tags\</code>, \<!-- multi-line comments -->, \<?multi-line processing instructions?>, \<!A multi-line declaration>, and \<!\[CDATA\[multi-line character data\]\]>."#
+            r#"Test \<code>multi-line tags\</code>, \<!-- multi-line comments -->, \<?multi-line processing instructions?>, \<!A multi-line declaration>, and <!\[CDATA\[multi-line character data\]\]>."#
         ),
         convert(html).unwrap()
     );
