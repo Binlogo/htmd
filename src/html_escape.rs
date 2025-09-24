@@ -1,11 +1,7 @@
 use std::borrow::Cow;
 
-/// Lightweight HTML tag escaping without regex dependency
-/// 
-/// This replaces the complex regex-based approach with simple pattern matching
-/// that identifies and escapes HTML-like patterns that would be interpreted
-/// by CommonMark as valid HTML.
-pub(crate) fn escape_html_simple(text: Cow<'_, str>) -> Cow<'_, str> {
+/// Escapes HTML-like patterns that would be interpreted as valid HTML by CommonMark
+pub(crate) fn escape_html(text: Cow<'_, str>) -> Cow<'_, str> {
     let mut result = String::new();
     let mut chars = text.char_indices().peekable();
     let mut modified = false;
@@ -68,8 +64,11 @@ fn find_html_pattern(text: &str) -> Option<usize> {
         return None;
     }
 
-    // CDATA: <![CDATA[...]]> - Don't escape these for now
+    // CDATA: <![CDATA[...]]>
     if text.starts_with("<![CDATA[") {
+        if let Some(pos) = text.find("]]>") {
+            return Some(pos + 3);
+        }
         return None;
     }
 
@@ -195,48 +194,47 @@ mod tests {
 
     #[test]
     fn test_simple_tags() {
-        assert_eq!(escape_html_simple("hello".into()), "hello");
-        assert_eq!(escape_html_simple("<p>".into()), "\\<p>");
-        assert_eq!(escape_html_simple("</p>".into()), "\\</p>");
-        assert_eq!(escape_html_simple("<div>content</div>".into()), "\\<div>content\\</div>");
+        assert_eq!(escape_html("hello".into()), "hello");
+        assert_eq!(escape_html("<p>".into()), "\\<p>");
+        assert_eq!(escape_html("</p>".into()), "\\</p>");
+        assert_eq!(escape_html("<div>content</div>".into()), "\\<div>content\\</div>");
     }
 
     #[test]
     fn test_comments() {
-        assert_eq!(escape_html_simple("<!-- comment -->".into()), "\\<!-- comment -->");
-        assert_eq!(escape_html_simple("<!---->".into()), "\\<!---->");
-        assert_eq!(escape_html_simple("<!--->".into()), "\\<!--->");
+        assert_eq!(escape_html("<!-- comment -->".into()), "\\<!-- comment -->");
+        assert_eq!(escape_html("<!---->".into()), "\\<!---->");
+        assert_eq!(escape_html("<!--->".into()), "\\<!--->");
     }
 
     #[test] 
     fn test_processing_instructions() {
-        assert_eq!(escape_html_simple("<?xml version=\"1.0\"?>".into()), "\\<?xml version=\"1.0\"?>");
-        assert_eq!(escape_html_simple("<?processing instructions?>".into()), "\\<?processing instructions?>");
+        assert_eq!(escape_html("<?xml version=\"1.0\"?>".into()), "\\<?xml version=\"1.0\"?>");
+        assert_eq!(escape_html("<?processing instructions?>".into()), "\\<?processing instructions?>");
     }
 
     #[test]
     fn test_declarations() {
-        assert_eq!(escape_html_simple("<!DOCTYPE html>".into()), "\\<!DOCTYPE html>");
-        assert_eq!(escape_html_simple("<!A declaration>".into()), "\\<!A declaration>");
+        assert_eq!(escape_html("<!DOCTYPE html>".into()), "\\<!DOCTYPE html>");
+        assert_eq!(escape_html("<!A declaration>".into()), "\\<!A declaration>");
     }
 
     #[test]
     fn test_cdata() {
-        // CDATA is not escaped by HTML escaping, only by markdown escaping later
-        assert_eq!(escape_html_simple("<![CDATA[character data]]>".into()), "<![CDATA[character data]]>");
+        assert_eq!(escape_html("<![CDATA[character data]]>".into()), "\\<![CDATA[character data]]>");
     }
 
     #[test]
     fn test_tags_with_attributes() {
-        assert_eq!(escape_html_simple("<a href=\"test\">".into()), "\\<a href=\"test\">");
-        assert_eq!(escape_html_simple("<img src='image.jpg' alt=\"test\"/>".into()), "\\<img src='image.jpg' alt=\"test\"/>");
+        assert_eq!(escape_html("<a href=\"test\">".into()), "\\<a href=\"test\">");
+        assert_eq!(escape_html("<img src='image.jpg' alt=\"test\"/>".into()), "\\<img src='image.jpg' alt=\"test\"/>");
     }
 
     #[test]
     fn test_non_html() {
-        assert_eq!(escape_html_simple("< not html".into()), "< not html");
-        assert_eq!(escape_html_simple("<123>".into()), "<123>");
-        assert_eq!(escape_html_simple("< >".into()), "< >");
+        assert_eq!(escape_html("< not html".into()), "< not html");
+        assert_eq!(escape_html("<123>".into()), "<123>");
+        assert_eq!(escape_html("< >".into()), "< >");
     }
 
     #[test]
@@ -244,26 +242,26 @@ mod tests {
         // From the real test cases
         let input = "Test <code>tags</code>, <!-- comments -->, <?processing instructions?>, <!A declaration>, and <![CDATA[character data]]>.";
         // Updated expected result to match current implementation
-        let expected = r"Test \<code>tags\</code>, \<!-- comments -->, \<?processing instructions?>, \<!A declaration>, and <![CDATA[character data]]>.";
-        assert_eq!(escape_html_simple(input.into()), expected);
+        let expected = r"Test \<code>tags\</code>, \<!-- comments -->, \<?processing instructions?>, \<!A declaration>, and \<![CDATA[character data]]>.";
+        assert_eq!(escape_html(input.into()), expected);
     }
 
     #[test]
     fn test_incomplete_block_tags() {
         // Test incomplete HTML block tags
-        assert_eq!(escape_html_simple("<pre".into()), "\\<pre");
-        assert_eq!(escape_html_simple("<script".into()), "\\<script");
-        assert_eq!(escape_html_simple("<style".into()), "\\<style");
-        assert_eq!(escape_html_simple("<address".into()), "\\<address");
-        assert_eq!(escape_html_simple("<ul".into()), "\\<ul");
+        assert_eq!(escape_html("<pre".into()), "\\<pre");
+        assert_eq!(escape_html("<script".into()), "\\<script");
+        assert_eq!(escape_html("<style".into()), "\\<style");
+        assert_eq!(escape_html("<address".into()), "\\<address");
+        assert_eq!(escape_html("<ul".into()), "\\<ul");
     }
 
     #[test]
     fn test_unicode_and_emoji() {
         // Test cases that would panic due to character/byte index confusion
-        assert_eq!(escape_html_simple("<p😀>".into()), "\\<p😀>");
-        assert_eq!(escape_html_simple("<div>😀</div>".into()), "\\<div>😀\\</div>");
-        assert_eq!(escape_html_simple("<p class='😀'>".into()), "\\<p class='😀'>");
-        assert_eq!(escape_html_simple("<script😀>".into()), "\\<script😀>");
+        assert_eq!(escape_html("<p😀>".into()), "\\<p😀>");
+        assert_eq!(escape_html("<div>😀</div>".into()), "\\<div>😀\\</div>");
+        assert_eq!(escape_html("<p class='😀'>".into()), "\\<p class='😀'>");
+        assert_eq!(escape_html("<script😀>".into()), "\\<script😀>");
     }
 }

@@ -7,7 +7,6 @@ use std::{borrow::Cow, cell::RefCell, rc::Rc};
 
 use super::{
     element_handler::ElementHandler,
-    html_escape_simple::escape_html_simple,
     node_util::get_node_tag_name,
     options::Options,
     text_util::{
@@ -80,7 +79,7 @@ fn append_text(
         buffer.push(text);
     } else {
         // Handle other elements or texts
-        let text = html_escape::decode_html_entities(&text);
+        let text = ::html_escape::decode_html_entities(&text);
         let text = escape_if_needed(text);
         let text = compress_whitespace(&text);
 
@@ -294,11 +293,6 @@ fn trim_buffer_end_spaces(buffer: &mut [String]) {
     }
 }
 
-// Perform the replacement.
-fn escape_html(text: Cow<'_, str>) -> Cow<'_, str> {
-    escape_html_simple(text)
-}
-
 /// Cases:
 /// '\'        -> '\\'
 /// '==='      -> '\==='      // h1
@@ -324,7 +318,7 @@ fn escape_if_needed(text: Cow<'_, str>) -> Cow<'_, str> {
     }
 
     if !need_escape {
-        return escape_html(text);
+        return crate::html_escape::escape_html(text);
     }
 
     let mut escaped = String::new();
@@ -363,7 +357,7 @@ fn escape_if_needed(text: Cow<'_, str>) -> Cow<'_, str> {
     }
 
     // Perform the HTML escape after the other escapes, so that the \ characters inserted here don't get escaped again.
-    escape_html(escaped.into())
+    crate::html_escape::escape_html(escaped.into())
 }
 
 /// Cases:
